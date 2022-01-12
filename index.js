@@ -160,6 +160,7 @@ main();
 
 async function fetchChunks(prefix, levelsRemaining, stream, at) {
   if (levelsRemaining <= 0) {
+    console.log("\nprefix: " + prefix + "    at: " + at);
     const pairs = await provider.send('state_getPairs', [prefix, at]);
     if (pairs.length > 0) {
       separator ? stream.write(",") : separator = true;
