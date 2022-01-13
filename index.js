@@ -3,7 +3,7 @@ const path = require('path');
 const chalk = require('chalk');
 const cliProgress = require('cli-progress');
 require("dotenv").config();
-const { ApiPromise } = require('@polkadot/api');
+const { ApiPromise, WsProvider } = require('@polkadot/api');
 const { HttpProvider } = require('@polkadot/rpc-provider');
 const { xxhashAsHex } = require('@polkadot/util-crypto');
 const execFileSync = require('child_process').execFileSync;
@@ -88,13 +88,14 @@ async function main() {
     // Download state of original chain
     console.log(chalk.green('Fetching current state of the live chain. Please wait, it can take a while depending on the size of your chain.'));
     let at = (await api.rpc.chain.getBlockHash()).toString();
-    progressBar.start(totalChunks, 0);
+    // progressBar.start(totalChunks, 0);
     const stream = fs.createWriteStream(storagePath, { flags: 'a' });
     stream.write("[");
-    await fetchChunks("0x", chunksLevel, stream, at);
+    //await fetchChunks("0x", chunksLevel, stream, at);
+    await fetchChunksMine("0x", chunksLevel, stream, at);
     stream.write("]");
     stream.end();
-    progressBar.stop();
+    // progressBar.stop();
   }
 
   const metadata = await api.rpc.state.getMetadata();
@@ -133,6 +134,7 @@ async function main() {
   storage
     .filter((i) => prefixes.some((prefix) => i[0].startsWith(prefix)))
     .forEach(([key, value]) => (forkedSpec.genesis.raw.top[key] = value));
+  
 
   // Delete System.LastRuntimeUpgrade to ensure that the on_runtime_upgrade event is triggered
   delete forkedSpec.genesis.raw.top['0x26aa394eea5630e07c48ae0c9558cef7f9cce9c888469bb1a0dceaa129672ef8'];
@@ -157,6 +159,51 @@ async function main() {
 }
 
 main();
+
+async function fetchChunksMine(prefix, levelsRemaining, stream, at) {
+  const wsProvider = new WsProvider(process.env.WSS_ENDPOINT || 'wss://ws.shibuya.bldnodes.org');
+  const api = await ApiPromise.create({ provider: wsProvider });
+
+  console.log("Genesis hash: " + await api.genesisHash.toHex());
+  console.log("Chain name: " + await api.rpc.system.chain());
+
+  const BATCH_SIZE = 128;
+
+  start_key = null;
+
+  batchNumber = 1;
+  while (true) {
+    keys = await api.rpc.state.getKeysPaged("0x", BATCH_SIZE, start_key, at);
+    values = await api.rpc.state.queryStorageAt(keys, at);
+
+    pairs = [];
+    keys.forEach((key, index) => {
+      temp = [String(key), String(values[index].value)];
+      pairs.push(temp);
+    });
+
+    if (pairs.length > 0) {
+      separator ? stream.write(",") : separator = true;
+      stream.write(JSON.stringify(pairs).slice(1, -1));
+      start_key = keys[keys.length - 1];
+    }
+
+    
+    
+
+    if (batchNumber % 20 == 1) {
+      console.log("Batch " + batchNumber + " finished.")
+    }
+    batchNumber++;
+
+    if (keys.length < BATCH_SIZE) {
+      break;
+    }
+
+    // break;
+  }
+  console.log("State fetching finished.");
+}
 
 async function fetchChunks(prefix, levelsRemaining, stream, at) {
   if (levelsRemaining <= 0) {
