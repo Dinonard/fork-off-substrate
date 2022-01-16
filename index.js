@@ -44,7 +44,7 @@ const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_cla
  * e.g. console.log(xxhashAsHex('System', 128)).
  */
 let prefixes = ['0x26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da9' /* System.Account */];
-const skippedModulesPrefix = ['System', 'Session', 'Babe', 'Grandpa', 'GrandpaFinality', 'FinalityTracker', 'Authorship'];
+const skippedModulesPrefix = ['System', 'Session', 'Babe', 'Grandpa', 'GrandpaFinality', 'FinalityTracker', 'Authorship', 'ParachainSystem'];
 
 async function fixParachinStates (api, forkedSpec) {
   const skippedKeys = [
@@ -101,13 +101,21 @@ async function main() {
   const metadata = await api.rpc.state.getMetadata();
   // Populate the prefixes array
   const modules = metadata.asLatest.pallets;
+
+  // prefixes = [];
   modules.forEach((module) => {
     if (module.storage) {
-      if (!skippedModulesPrefix.includes(module.name)) {
+      if (!skippedModulesPrefix.includes(String(module.name))) {
         prefixes.push(xxhashAsHex(module.name, 128));
       }
+      // if (String(module.name) == 'DappsStaking') {
+      //   console.log("Adding DappsStaking");
+      //   prefixes.push(xxhashAsHex(String(module.name), 128));
+      // }
     }
   });
+
+  console.log("Original chain: " + originalChain);
 
   // Generate chain spec for original and forked chains
   if (originalChain == '') {
@@ -122,6 +130,7 @@ async function main() {
   }
 
   let storage = JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+  console.log("Storage length: " + storage.length);
   let originalSpec = JSON.parse(fs.readFileSync(originalSpecPath, 'utf8'));
   let forkedSpec = JSON.parse(fs.readFileSync(forkedSpecPath, 'utf8'));
 
@@ -130,10 +139,20 @@ async function main() {
   forkedSpec.id = originalSpec.id + '-fork';
   forkedSpec.protocolId = originalSpec.protocolId;
 
+  // TODO: hardcoded for now but can be improved later
+  forkedSpec.relayChain = "tokyo";
+  forkedSpec.paraId = 1000;
+
   // Grab the items to be moved, then iterate through and insert into storage
+  counter = 0;
   storage
     .filter((i) => prefixes.some((prefix) => i[0].startsWith(prefix)))
-    .forEach(([key, value]) => (forkedSpec.genesis.raw.top[key] = value));
+    .forEach(([key, value]) => {
+      counter++;
+      forkedSpec.genesis.raw.top[key] = value;
+    });
+
+  console.log("Key-value count: " + counter);
   
 
   // Delete System.LastRuntimeUpgrade to ensure that the on_runtime_upgrade event is triggered
@@ -187,9 +206,6 @@ async function fetchChunksMine(prefix, levelsRemaining, stream, at) {
       stream.write(JSON.stringify(pairs).slice(1, -1));
       start_key = keys[keys.length - 1];
     }
-
-    
-    
 
     if (batchNumber % 20 == 1) {
       console.log("Batch " + batchNumber + " finished.")
